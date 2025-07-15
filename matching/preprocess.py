@@ -163,9 +163,11 @@ def preprocess_owners(owners_df: pd.DataFrame) -> pd.DataFrame:
     
     # Standardize column names (adjust based on actual column names)
     column_mapping = {
-        # Map actual column names to standard names
-        # Example: 'Property Name' -> 'project'
-        # Add your actual column mappings here
+        'Project': 'project',
+        'BuildingNameEn': 'building',
+        'UnitNumber': 'unit_number',
+        ' Size ': 'area',
+        'NameEn': 'owner_name'
     }
     
     # Apply column mapping if provided
@@ -212,9 +214,11 @@ def preprocess_transactions(transactions_df: pd.DataFrame) -> pd.DataFrame:
     
     # Standardize column names (adjust based on actual column names)
     column_mapping = {
-        # Map actual column names to standard names
-        # Example: 'Property Name' -> 'project'
-        # Add your actual column mappings here
+        'project_name_en': 'project',
+        'building_name_en': 'building',
+        'unit_number': 'unit_number',
+        'procedure_area': 'area',
+        'buyer_name': 'buyer_name'
     }
     
     # Apply column mapping if provided
@@ -228,8 +232,8 @@ def preprocess_transactions(transactions_df: pd.DataFrame) -> pd.DataFrame:
             df[f'{col}_clean'] = df[col].apply(normalize_string).apply(replace_synonyms)
     
     # Extract and normalize unit numbers
-    if 'unit_number' in df.columns:
-        df['unit_no'] = df['unit_number'].apply(extract_unit_number)
+    # No unit_number column in transactions, so set to empty string
+    df['unit_no'] = ""
     
     # Normalize area
     if 'area' in df.columns:
