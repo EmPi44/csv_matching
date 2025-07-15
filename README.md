@@ -1,15 +1,56 @@
-# CSV Processing Backend
+# Dubai Hills Property Matching Pipeline
 
-A Python FastAPI backend for processing large CSV files (900MB+) with capabilities for column removal and file splitting based on size.
+A Python 3.11 data-processing pipeline that links Dubai Hills property-owner records to DLD transaction records with ≥ 98% precision + recall. The pipeline features three automated matching tiers plus a lightweight manual review UI.
 
 ## Features
 
+### Property Matching Pipeline
+- **Three-tier matching system**: Deterministic, fuzzy, and manual review
+- **High precision matching**: ≥ 98% precision and recall target
+- **Automated preprocessing**: Data cleaning, normalization, and composite key generation
+- **Fuzzy string matching**: Advanced similarity scoring for non-exact matches
+- **Manual review interface**: Streamlit-based UI for human validation
+- **Comprehensive reporting**: QA reports and match statistics
+- **Modular architecture**: Clean separation of concerns
+
+### CSV Processing Backend (Legacy)
 - **Memory-efficient processing**: Handles large CSV files without loading them entirely into memory
 - **Column removal**: Remove irrelevant columns from CSV data
 - **File splitting**: Split large files into smaller chunks based on size limits
-- **Combined operations**: Remove columns and split files in one operation
 - **RESTful API**: FastAPI-based web service with automatic documentation
-- **Progress tracking**: Real-time logging of processing progress
+
+## Repository Structure
+
+```
+repo-root/
+│
+├── data/
+│   ├── raw/
+│   │   ├── owners/20250716/Dubai Hills.xlsx
+│   │   └── transactions/20250716/
+│   │       ├── corrected_transactions_part_001.csv
+│   │       └── …
+│   ├── processed/          # pipeline output written here
+│   └── review/             # parquet with human decisions
+│
+├── matching/
+│   ├── __init__.py
+│   ├── preprocess.py       # cleaning + normalisation helpers
+│   ├── deterministic.py    # tier-1 exact join
+│   ├── fuzzy.py            # tier-2 fuzzy scorer
+│   ├── review_helpers.py   # load & merge human approvals
+│   └── pipeline.py         # main pipeline orchestration
+│
+├── ui/
+│   └── review_app.py       # Streamlit manual-review interface
+│
+├── tests/
+│   └── test_preprocess.py  # pytest unit tests
+│
+├── Dockerfile
+├── requirements.txt
+└── README.md
+```
 
 ## Installation
 
@@ -26,21 +67,7 @@ chmod +x install.sh
 install.bat
 ```
 
-### Option 2: Python Setup Script
-
-1. Clone or download the project files
-2. Run the automated setup script:
-
-```bash
-python setup.py
-```
-
-This will:
-- Create a virtual environment
-- Install all dependencies
-- Create activation scripts for easy use
-
-### Option 3: Manual Setup
+### Option 2: Manual Setup
 
 1. Clone or download the project files
 2. Create a virtual environment:
@@ -81,36 +108,37 @@ source activate_env.sh
 activate_env.bat
 ```
 
-### Option 2: Manual Setup
-
-1. Clone or download the project files
-2. Create a virtual environment:
-
-```bash
-python -m venv venv
-```
-
-3. Activate the virtual environment:
-
-**On macOS/Linux:**
-```bash
-source venv/bin/activate
-```
-
-**On Windows:**
-```bash
-venv\Scripts\activate
-```
-
-4. Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
 ## Quick Start
 
-### Running the API Server
+### Property Matching Pipeline
+
+1. **Run the example pipeline**:
+```bash
+python example_matching.py
+```
+
+This will:
+- Create sample data
+- Run the complete matching pipeline
+- Generate outputs in `data/processed/`
+- Display match statistics
+
+2. **Use your own data**:
+```python
+from matching.pipeline import run_matching_pipeline
+
+results = run_matching_pipeline(
+    owners_file="path/to/owners.csv",
+    transactions_file="path/to/transactions.csv"
+)
+```
+
+3. **Start the review UI** (if manual review is needed):
+```bash
+streamlit run ui/review_app.py
+```
+
+### CSV Processing Backend (Legacy)
 
 ```bash
 python main.py
@@ -118,7 +146,84 @@ python main.py
 
 The server will start on `http://localhost:8000`
 
-### API Documentation
+## Matching Pipeline Details
+
+### Tier 1: Deterministic Matching
+- **Method**: Exact join on composite keys
+- **Composite Key**: `project_clean + building_clean + unit_no`
+- **Validation**: Area difference ≤ 1%
+- **Confidence**: 1.00 (High bucket)
+- **Action**: Auto-accept
+
+### Tier 2: Fuzzy Matching
+- **Method**: Fuzzy string similarity with scoring
+- **Blocking**: Same project
+- **Scoring Formula**:
+  ```
+  building_sim = token_set_ratio(bldg_owner, bldg_txn) / 100
+  unit_match   = 1.0 if unit_exact else 0.0
+  area_score   = max(0, 1 - abs(area_pct_diff) / 0.02)
+  score        = 0.5*building_sim + 0.3*unit_match + 0.2*area_score
+  ```
+- **Thresholds**:
+  - High: ≥ 0.90 (auto-accept)
+  - Medium: 0.85-0.90 (optional review)
+  - Low: 0.75-0.85 (manual review required)
+  - Reject: < 0.75
+
+### Tier 3: Manual Review
+- **Input**: Low confidence matches + multiple candidates
+- **Interface**: Streamlit web application
+- **Actions**: Approve/Reject/Skip
+- **Output**: Human decisions merged back into pipeline
+
+## Outputs
+
+The pipeline generates the following outputs in `data/processed/`:
+
+- **matches.parquet**: Final matches with confidence scores
+- **owners_unmatched.csv**: Owners that couldn't be matched
+- **transactions_unmatched.csv**: Transactions that couldn't be matched
+- **qa_report.md**: Comprehensive quality assurance report
+
+## Configuration
+
+### Data Format Requirements
+
+**Owner Records** should include:
+- `project`: Property project name
+- `building`: Building/tower name
+- `unit_number`: Unit or apartment number
+- `area`: Property area (sqm or sqft)
+- `owner_name`: Owner name
+
+**Transaction Records** should include:
+- `project`: Property project name
+- `building`: Building/tower name
+- `unit_number`: Unit or apartment number
+- `area`: Property area (sqm or sqft)
+- `buyer_name`: Buyer name
+
+### Column Mapping
+
+If your data uses different column names, update the `column_mapping` dictionaries in:
+- `matching/preprocess.py` (lines ~150 and ~200)
+
+## Testing
+
+Run the test suite:
+
+```bash
+pytest tests/
+```
+
+Run specific tests:
+
+```bash
+pytest tests/test_preprocess.py -v
+```
+
+## API Documentation (Legacy CSV Processing)
 
 Once the server is running, visit:
 - **Interactive API docs**: `http://localhost:8000/docs`
@@ -126,190 +231,73 @@ Once the server is running, visit:
 
 ## Usage Examples
 
-### 1. Using the API
-
-#### Get CSV File Information
-```bash
-curl "http://localhost:8000/csv/info/path%2Fto%2Fyour%2Ffile.csv"
-```
-
-#### Remove Columns
-```bash
-curl -X POST "http://localhost:8000/csv/remove-columns" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "input_file": "/path/to/input.csv",
-    "output_file": "/path/to/output.csv",
-    "columns_to_remove": ["unused_column", "metadata_field"]
-  }'
-```
-
-#### Split File by Size
-```bash
-curl -X POST "http://localhost:8000/csv/split" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "input_file": "/path/to/input.csv",
-    "output_dir": "/path/to/output/directory",
-    "max_size_mb": 50
-  }'
-```
-
-#### Combined Operation (Remove Columns + Split)
-```bash
-curl -X POST "http://localhost:8000/csv/process-and-split" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "input_file": "/path/to/input.csv",
-    "output_dir": "/path/to/output/directory",
-    "columns_to_remove": ["unused_column", "metadata_field"],
-    "max_size_mb": 50
-  }'
-```
-
-### 2. Using the Python Module Directly
+### Property Matching
 
 ```python
-from csv_processor import CSVProcessor
+from matching.pipeline import run_matching_pipeline
 
-# Initialize processor
-processor = CSVProcessor(chunk_size=10000)
-
-# Get file information
-info = processor.get_csv_info("your_large_file.csv")
-print(f"File size: {info['file_size_mb']} MB")
-print(f"Columns: {info['columns']}")
-
-# Remove irrelevant columns
-result = processor.remove_columns(
-    "your_large_file.csv",
-    "cleaned_data.csv",
-    ["unused_column", "metadata_field"]
+# Run complete pipeline
+results = run_matching_pipeline(
+    owners_file="data/raw/owners/20250716/Dubai Hills.xlsx",
+    transactions_file="data/raw/transactions/20250716/transactions.csv"
 )
 
-# Split into smaller files
-split_result = processor.split_file_by_size(
-    "cleaned_data.csv",
-    "split_files",
-    max_size_mb=50
+# Access results
+print(f"Total matches: {results['data_volumes']['total_matches']}")
+print(f"Match rate: {results['match_rates']['owner_match_rate']:.1%}")
+```
+
+### Manual Review
+
+1. Start the review application:
+```bash
+streamlit run ui/review_app.py
+```
+
+2. Load review pairs from `data/review/pairs.parquet`
+3. Review each pair and make decisions
+4. Save decisions to `data/review/decisions_*.parquet`
+
+### Individual Components
+
+```python
+from matching.preprocess import preprocess_owners, preprocess_transactions
+from matching.deterministic import tier1_deterministic_match
+from matching.fuzzy import tier2_fuzzy_match
+
+# Preprocess data
+owners_clean = preprocess_owners(owners_df)
+transactions_clean = preprocess_transactions(transactions_df)
+
+# Run individual tiers
+tier1_matches, unmatched_owners, unmatched_txns = tier1_deterministic_match(
+    owners_clean, transactions_clean
+)
+
+tier2_matches, final_unmatched_owners, final_unmatched_txns = tier2_fuzzy_match(
+    unmatched_owners, unmatched_txns
 )
 ```
 
-### 3. Running the Example Script
+## Monitoring and Logging
 
-```bash
-python example_usage.py
-```
+- **Logs**: Written to `logs/matching_pipeline.log`
+- **Metrics**: Pipeline statistics in QA reports
+- **Progress**: Real-time logging of each pipeline step
 
-## API Endpoints
+## Performance
 
-### GET `/`
-Root endpoint with API information and available endpoints.
+- **Memory efficient**: Processes large datasets in chunks
+- **Scalable**: Modular design allows for parallel processing
+- **Fast**: Optimized algorithms for deterministic and fuzzy matching
 
-### GET `/health`
-Health check endpoint.
+## Contributing
 
-### GET `/csv/info/{file_path}`
-Get information about a CSV file without loading it entirely into memory.
-
-**Parameters:**
-- `file_path`: URL-encoded path to the CSV file
-
-**Response:**
-```json
-{
-  "file_size_mb": 900.5,
-  "total_rows": 1000000,
-  "columns": ["col1", "col2", "col3"],
-  "column_count": 3
-}
-```
-
-### POST `/csv/remove-columns`
-Remove specified columns from a CSV file.
-
-**Request Body:**
-```json
-{
-  "input_file": "/path/to/input.csv",
-  "output_file": "/path/to/output.csv",
-  "columns_to_remove": ["col1", "col2"]
-}
-```
-
-### POST `/csv/split`
-Split a CSV file into smaller files based on size limit.
-
-**Request Body:**
-```json
-{
-  "input_file": "/path/to/input.csv",
-  "output_dir": "/path/to/output/directory",
-  "max_size_mb": 50
-}
-```
-
-### POST `/csv/process-and-split`
-Combined operation: remove columns and then split the file.
-
-**Request Body:**
-```json
-{
-  "input_file": "/path/to/input.csv",
-  "output_dir": "/path/to/output/directory",
-  "columns_to_remove": ["col1", "col2"],
-  "max_size_mb": 50
-}
-```
-
-## Configuration
-
-### Chunk Size
-The `chunk_size` parameter in `CSVProcessor` controls how many rows are processed at once. For very large files, you might want to increase this value:
-
-```python
-processor = CSVProcessor(chunk_size=50000)  # Process 50k rows at a time
-```
-
-### Memory Considerations
-- The processor uses pandas' `chunksize` parameter to avoid loading the entire file into memory
-- Each chunk is processed independently and written to disk
-- Temporary files are cleaned up automatically
-
-## File Structure
-
-```
-csv_pipeline/
-├── main.py              # FastAPI application
-├── csv_processor.py     # Core CSV processing logic
-├── api_models.py        # Pydantic models for API
-├── example_usage.py     # Example usage script
-├── requirements.txt     # Python dependencies
-└── README.md           # This file
-```
-
-## Error Handling
-
-The API includes comprehensive error handling:
-- File not found errors (404)
-- Invalid column names (400)
-- Processing errors (500)
-- Detailed error messages and logging
-
-## Performance Tips
-
-1. **For 900MB+ files**: Use chunk sizes of 10,000-50,000 rows
-2. **Column removal**: Process in chunks to avoid memory issues
-3. **File splitting**: Choose appropriate size limits based on your use case
-4. **Output directories**: Ensure sufficient disk space for processed files
-
-## Dependencies
-
-- **FastAPI**: Modern web framework for building APIs
-- **Pandas**: Data manipulation and analysis
-- **Pydantic**: Data validation using Python type annotations
-- **Uvicorn**: ASGI server for running FastAPI applications
+1. Follow the existing code style (snake_case for Python)
+2. Add tests for new functionality
+3. Update documentation for any changes
+4. Ensure all tests pass before submitting
 
 ## License
 
-This project is open source and available under the MIT License. 
+This project is licensed under the MIT License - see the LICENSE file for details. 
