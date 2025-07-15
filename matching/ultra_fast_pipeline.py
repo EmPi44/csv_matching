@@ -340,11 +340,27 @@ def run_ultra_fast_pipeline(
     owners_clean = preprocess_owners(owners_df)
     transactions_clean = preprocess_transactions(transactions_df)
     
+    # Save intermediate: preprocessed data
+    logger.info("Saving preprocessed data for reference")
+    owners_clean.to_csv(os.path.join(output_dir, "preprocessed_owners.csv"), index=False)
+    transactions_clean.to_csv(os.path.join(output_dir, "preprocessed_transactions.csv"), index=False)
+    
     # Ultra-fast deterministic matching
     logger.info("Running ultra-fast deterministic matching")
     tier1_matches, unmatched_owners, unmatched_transactions = ultra_fast_deterministic_match(
         owners_clean, transactions_clean
     )
+    
+    # Save intermediate: tier 1 results
+    logger.info("Saving tier 1 (deterministic) results")
+    if len(tier1_matches) > 0:
+        tier1_path = os.path.join(output_dir, "tier1_deterministic_matches.parquet")
+        tier1_matches.to_parquet(tier1_path, index=False)
+        logger.info(f"Saved {len(tier1_matches)} tier 1 matches to {tier1_path}")
+    
+    # Save intermediate: unmatched after tier 1
+    unmatched_owners.to_csv(os.path.join(output_dir, "unmatched_owners_after_tier1.csv"), index=False)
+    unmatched_transactions.to_csv(os.path.join(output_dir, "unmatched_transactions_after_tier1.csv"), index=False)
     
     # Ultra-fast fuzzy matching
     logger.info("Running ultra-fast fuzzy matching")
@@ -352,11 +368,18 @@ def run_ultra_fast_pipeline(
         unmatched_owners, unmatched_transactions, chunk_size=chunk_size
     )
     
+    # Save intermediate: tier 2 results
+    logger.info("Saving tier 2 (fuzzy) results")
+    if len(tier2_matches) > 0:
+        tier2_path = os.path.join(output_dir, "tier2_fuzzy_matches.parquet")
+        tier2_matches.to_parquet(tier2_path, index=False)
+        logger.info(f"Saved {len(tier2_matches)} tier 2 matches to {tier2_path}")
+    
     # Combine all matches
     all_matches = pd.concat([tier1_matches, tier2_matches], ignore_index=True)
     
-    # Write outputs
-    logger.info("Writing pipeline outputs")
+    # Write final outputs
+    logger.info("Writing final pipeline outputs")
     matches_path = os.path.join(output_dir, "ultra_fast_matches.parquet")
     all_matches.to_parquet(matches_path, index=False)
     
@@ -367,6 +390,13 @@ def run_ultra_fast_pipeline(
     if len(final_unmatched_transactions) > 0:
         unmatched_txns_path = os.path.join(output_dir, "ultra_fast_transactions_unmatched.csv")
         final_unmatched_transactions.to_csv(unmatched_txns_path, index=False)
+    
+    # Create detailed summary report
+    summary_path = os.path.join(output_dir, "ultra_fast_summary.md")
+    create_detailed_summary(
+        owners_clean, transactions_clean, tier1_matches, tier2_matches, 
+        final_unmatched_owners, final_unmatched_transactions, summary_path, run_id
+    )
     
     # Compile statistics
     total_owners = len(owners_clean)
@@ -396,4 +426,118 @@ def run_ultra_fast_pipeline(
     }
     
     logger.info(f"Ultra-fast pipeline completed: {total_matches} matches from {total_owners} owners and {total_transactions} transactions")
-    return stats 
+    return stats
+
+
+def create_detailed_summary(
+    owners_df: pd.DataFrame,
+    transactions_df: pd.DataFrame,
+    tier1_matches: pd.DataFrame,
+    tier2_matches: pd.DataFrame,
+    unmatched_owners: pd.DataFrame,
+    unmatched_transactions: pd.DataFrame,
+    output_path: str,
+    run_id: str
+):
+    """Create a detailed summary report."""
+    
+    total_owners = len(owners_df)
+    total_transactions = len(transactions_df)
+    total_matches = len(tier1_matches) + len(tier2_matches)
+    
+    # Sample matches for preview
+    tier1_sample = tier1_matches.head(10) if len(tier1_matches) > 0 else pd.DataFrame()
+    tier2_sample = tier2_matches.head(10) if len(tier2_matches) > 0 else pd.DataFrame()
+    
+    with open(output_path, 'w') as f:
+        f.write(f"""# Ultra-Fast Pipeline Results Summary
+
+**Run ID**: {run_id}  
+**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+## 📊 Overall Statistics
+
+| Metric | Value |
+|--------|-------|
+| **Total Owners** | {total_owners:,} |
+| **Total Transactions** | {total_transactions:,} |
+| **Total Matches** | {total_matches:,} |
+| **Owner Match Rate** | {total_matches/total_owners*100:.1f}% |
+| **Transaction Match Rate** | {total_matches/total_transactions*100:.1f}% |
+
+## 🎯 Tier Performance
+
+### Tier 1: Deterministic Matches
+- **Matches Found**: {len(tier1_matches):,}
+- **Match Rate**: {len(tier1_matches)/total_owners*100:.1f}%
+- **Confidence**: 100% (exact matches)
+
+### Tier 2: Fuzzy Matches  
+- **Matches Found**: {len(tier2_matches):,}
+- **Match Rate**: {len(tier2_matches)/total_owners*100:.1f}%
+- **Average Confidence**: {tier2_matches['confidence'].mean():.1% if len(tier2_matches) > 0 else 'N/A'}
+
+## 📁 Output Files
+
+### Main Results
+- `ultra_fast_matches.parquet` - All matches combined
+- `ultra_fast_owners_unmatched.csv` - Unmatched owners
+- `ultra_fast_transactions_unmatched.csv` - Unmatched transactions
+
+### Intermediate Results
+- `tier1_deterministic_matches.parquet` - Exact matches only
+- `tier2_fuzzy_matches.parquet` - Fuzzy matches only
+- `preprocessed_owners.csv` - Cleaned owner data
+- `preprocessed_transactions.csv` - Cleaned transaction data
+
+## 🔍 Sample Matches
+
+### Tier 1 Sample (Exact Matches)
+""")
+        
+        if len(tier1_sample) > 0:
+            f.write("| Owner ID | Transaction ID | Match Type | Confidence |\n")
+            f.write("|----------|----------------|------------|------------|\n")
+            for _, row in tier1_sample.iterrows():
+                f.write(f"| {row['owner_id']} | {row['txn_id']} | {row['match_type']} | {row['confidence']:.1%} |\n")
+        else:
+            f.write("*No exact matches found*\n")
+        
+        f.write("\n### Tier 2 Sample (Fuzzy Matches)\n")
+        
+        if len(tier2_sample) > 0:
+            f.write("| Owner ID | Transaction ID | Match Type | Confidence | Score |\n")
+            f.write("|----------|----------------|------------|------------|-------|\n")
+            for _, row in tier2_sample.iterrows():
+                f.write(f"| {row['owner_id']} | {row['txn_id']} | {row['match_type']} | {row['confidence']:.1%} | {row['match_score']:.3f} |\n")
+        else:
+            f.write("*No fuzzy matches found*\n")
+        
+        f.write(f"""
+## 📈 Data Quality Metrics
+
+### Unmatched Records
+- **Unmatched Owners**: {len(unmatched_owners):,} ({len(unmatched_owners)/total_owners*100:.1f}%)
+- **Unmatched Transactions**: {len(unmatched_transactions):,} ({len(unmatched_transactions)/total_transactions*100:.1f}%)
+
+### Confidence Distribution
+""")
+        
+        if len(tier2_matches) > 0:
+            confidence_buckets = tier2_matches['confidence_bucket'].value_counts()
+            for bucket, count in confidence_buckets.items():
+                f.write(f"- **{bucket}**: {count:,} ({count/len(tier2_matches)*100:.1f}%)\n")
+        
+        f.write(f"""
+## ⚡ Performance Notes
+
+- **Processing Method**: Ultra-fast parallel processing
+- **Chunk Size**: Optimized for memory efficiency
+- **Workers**: Maximum CPU utilization
+- **File Format**: Parquet for fast I/O
+
+---
+*Generated by Ultra-Fast Matching Pipeline v2.0*
+""")
+    
+    logger.info(f"Detailed summary saved to {output_path}") 
