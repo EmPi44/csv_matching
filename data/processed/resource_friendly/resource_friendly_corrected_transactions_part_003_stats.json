@@ -1,0 +1,22 @@
+{
+  "run_id": "resource_friendly_corrected_transactions_part_003",
+  "timestamp": "2025-07-16T03:04:21.149016",
+  "platform": "M4 MacBook Pro",
+  "cores_used": 14,
+  "memory_gb": 24,
+  "data_volumes": {
+    "total_owners": 22840,
+    "total_transactions": 210323,
+    "total_matches": 0
+  },
+  "match_rates": {
+    "owner_match_rate": 0.0,
+    "transaction_match_rate": 0.0
+  },
+  "tier_performance": {
+    "tier1_matches": 0,
+    "tier2_matches": 0,
+    "tier1_rate": 0.0,
+    "tier2_rate": 0.0
+  }
+}

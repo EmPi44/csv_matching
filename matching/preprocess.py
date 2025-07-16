@@ -146,54 +146,36 @@ def generate_composite_key(row: pd.Series, property_type: str = "apartment") -> 
         return f"{project_clean}_{plot_no}".replace(' ', '_')
 
 
-def preprocess_owners(owners_df: pd.DataFrame) -> pd.DataFrame:
+def preprocess_owners(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Preprocess owner records for matching.
-    
-    Args:
-        owners_df: Raw owner DataFrame
-        
-    Returns:
-        Cleaned owner DataFrame with unified column names
+    Preprocess Dubai Hills owners file (raw CSV format).
+    Maps columns and generates owner_id if missing.
     """
-    logger.info(f"Preprocessing {len(owners_df)} owner records")
-    
-    # Create a copy to avoid modifying original
-    df = owners_df.copy()
-    
-    # Standardize column names (adjust based on actual column names)
-    column_mapping = {
-        'Project': 'project',
-        'BuildingNameEn': 'building',
-        'UnitNumber': 'unit_number',
-        ' Size ': 'area',
-        'NameEn': 'owner_name'
-    }
-    
-    # Apply column mapping if provided
-    if column_mapping:
-        df = df.rename(columns=column_mapping)
-    
-    # Normalize string fields
-    string_columns = ['project', 'building', 'unit_number', 'owner_name']
-    for col in string_columns:
-        if col in df.columns:
-            df[f'{col}_clean'] = df[col].apply(normalize_string).apply(replace_synonyms)
-    
-    # Extract and normalize unit numbers
-    if 'unit_number' in df.columns:
-        df['unit_no'] = df['unit_number'].apply(extract_unit_number)
-    
-    # Normalize area
-    if 'area' in df.columns:
-        df['area_sqm'] = df['area'].apply(normalize_area)
-    
-    # Generate composite keys
-    df['composite_key'] = df.apply(
-        lambda row: generate_composite_key(row, "apartment"), axis=1
-    )
-    
-    logger.info(f"Preprocessing complete. Generated {len(df)} cleaned owner records")
+    # Standardize column names
+    df = df.rename(columns={
+        'BuildingNameEn': 'building_clean',
+        'UnitNumber': 'unit_no',
+        ' Size ': 'area_sqm',
+        'NameEn': 'owner_name',
+        'ProcedurePartyTypeNameEn': 'party_type',
+    })
+    # Only keep buyers
+    df = df[df['party_type'].str.lower() == 'buyer'].copy()
+    # Generate owner_id if missing
+    if 'owner_id' not in df.columns:
+        df['owner_id'] = (
+            df['building_clean'].astype(str).str.lower().str.strip() + '_' +
+            df['unit_no'].astype(str).str.strip() + '_' +
+            df['owner_name'].astype(str).str.lower().str.strip()
+        )
+    # Clean area
+    df['area_sqm'] = pd.to_numeric(df['area_sqm'], errors='coerce')
+    # Clean unit_no
+    df['unit_no'] = df['unit_no'].astype(str).str.strip()
+    # Clean building
+    df['building_clean'] = df['building_clean'].astype(str).str.lower().str.strip()
+    # Drop duplicates
+    df = df.drop_duplicates(subset=['owner_id'])
     return df
 
 
@@ -214,35 +196,25 @@ def preprocess_transactions(transactions_df: pd.DataFrame) -> pd.DataFrame:
     
     # Standardize column names (adjust based on actual column names)
     column_mapping = {
-        'project_name_en': 'project',
-        'building_name_en': 'building',
-        'unit_number': 'unit_number',
-        'procedure_area': 'area',
-        'buyer_name': 'buyer_name'
+        'transaction_id': 'txn_id',
+        'building_name_en': 'building_clean',
+        'procedure_area': 'area_sqm',
+        'project_name_en': 'project'
     }
     
     # Apply column mapping if provided
     if column_mapping:
         df = df.rename(columns=column_mapping)
     
-    # Normalize string fields
-    string_columns = ['project', 'building', 'unit_number', 'buyer_name']
-    for col in string_columns:
-        if col in df.columns:
-            df[f'{col}_clean'] = df[col].apply(normalize_string).apply(replace_synonyms)
+    # Clean area
+    df['area_sqm'] = pd.to_numeric(df['area_sqm'], errors='coerce')
     
-    # Extract and normalize unit numbers
-    # No unit_number column in transactions, so set to empty string
-    df['unit_no'] = ""
+    # Clean building name
+    df['building_clean'] = df['building_clean'].astype(str).str.lower().str.strip()
     
-    # Normalize area
-    if 'area' in df.columns:
-        df['area_sqm'] = df['area'].apply(normalize_area)
-    
-    # Generate composite keys
-    df['composite_key'] = df.apply(
-        lambda row: generate_composite_key(row, "apartment"), axis=1
-    )
+    # Generate unit_no if missing (use transaction_id as fallback)
+    if 'unit_no' not in df.columns:
+        df['unit_no'] = df['txn_id'].astype(str).str.strip()
     
     logger.info(f"Preprocessing complete. Generated {len(df)} cleaned transaction records")
     return df
