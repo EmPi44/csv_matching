@@ -10,6 +10,7 @@ import re
 import unicodedata
 from typing import Tuple, Dict, Any
 from loguru import logger
+from datetime import datetime
 
 
 def normalize_string(text: str) -> str:
@@ -33,6 +34,65 @@ def normalize_string(text: str) -> str:
     text = text.lower().strip()
     
     return text
+
+
+def normalize_date(date_value: Any) -> str:
+    """
+    Normalize date fields from DD-MM-YYYY format to YYYY-MM-DD format.
+    
+    Args:
+        date_value: Date value (could be string, datetime, or other format)
+        
+    Returns:
+        Date in YYYY-MM-DD format as string, or empty string if invalid
+    """
+    if pd.isna(date_value):
+        return ""
+    
+    try:
+        # If it's already a datetime object, format it
+        if isinstance(date_value, datetime):
+            return date_value.strftime('%Y-%m-%d')
+        
+        # Convert to string
+        date_str = str(date_value).strip()
+        
+        # Handle empty strings
+        if not date_str:
+            return ""
+        
+        # Try to parse DD-MM-YYYY format
+        if re.match(r'\d{2}-\d{2}-\d{4}', date_str):
+            # Parse DD-MM-YYYY format
+            parsed_date = datetime.strptime(date_str, '%d-%m-%Y')
+            return parsed_date.strftime('%Y-%m-%d')
+        
+        # Try to parse YYYY-MM-DD format (already correct)
+        elif re.match(r'\d{4}-\d{2}-\d{2}', date_str):
+            return date_str
+        
+        # Try to parse MM/DD/YYYY format
+        elif re.match(r'\d{1,2}/\d{1,2}/\d{4}', date_str):
+            parsed_date = datetime.strptime(date_str, '%m/%d/%Y')
+            return parsed_date.strftime('%Y-%m-%d')
+        
+        # Try to parse DD/MM/YYYY format
+        elif re.match(r'\d{1,2}/\d{1,2}/\d{4}', date_str):
+            parsed_date = datetime.strptime(date_str, '%d/%m/%Y')
+            return parsed_date.strftime('%Y-%m-%d')
+        
+        # If none of the above patterns match, try pandas to_datetime
+        else:
+            parsed_date = pd.to_datetime(date_str, errors='coerce')
+            if pd.notna(parsed_date):
+                return parsed_date.strftime('%Y-%m-%d')
+            else:
+                logger.warning(f"Could not parse date: {date_str}")
+                return ""
+                
+    except Exception as e:
+        logger.warning(f"Error parsing date '{date_value}': {e}")
+        return ""
 
 
 def replace_synonyms(text: str) -> str:
@@ -215,6 +275,13 @@ def preprocess_transactions(transactions_df: pd.DataFrame) -> pd.DataFrame:
     # Generate unit_no if missing (use transaction_id as fallback)
     if 'unit_no' not in df.columns:
         df['unit_no'] = df['txn_id'].astype(str).str.strip()
+    
+    # Clean date fields if they exist
+    date_columns = ['instance_date', 'created_at', 'updated_at', 'transaction_date']
+    for col in date_columns:
+        if col in df.columns:
+            logger.info(f"Normalizing date column: {col}")
+            df[col] = df[col].apply(normalize_date)
     
     logger.info(f"Preprocessing complete. Generated {len(df)} cleaned transaction records")
     return df
